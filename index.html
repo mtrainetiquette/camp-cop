@@ -860,13 +860,13 @@
   --sc-accent-bg: #fff3e8;
   --sc-radius: 6px;
   --sc-cell-height: 18px;
-  --ev-staff:#e8f4e8; --ev-staff-b:#2d6b2d; --ev-staff-t:#1a441a;
+  --ev-staff:#ffe4e4; --ev-staff-b:#c11515; --ev-staff-t:#6b0808;
   --ev-meal:#fff4e0; --ev-meal-b:#b87a00; --ev-meal-t:#6b4600;
   --ev-workshop:#e8eeff; --ev-workshop-b:#3a52cc; --ev-workshop-t:#1e2d80;
   --ev-round:#fce8ff; --ev-round-b:#8b2db0; --ev-round-t:#500a70;
   --ev-elective:#e8fef0; --ev-elective-b:#1a7a45; --ev-elective-t:#0a4025;
   --ev-closing:#fff8e1; --ev-closing-b:#c47a00; --ev-closing-t:#6b4200;
-  --ev-congress:#ffeaea; --ev-congress-b:#b02020; --ev-congress-t:#6b0808;
+  --ev-cabin_cup:#ffd8a8; --ev-cabin_cup-b:#d94f00; --ev-cabin_cup-t:#7a2b00;
   --ev-other:#f0f0ee; --ev-other-b:#5a5a54; --ev-other-t:#2a2a26;
   font-size: 13px;
   color: var(--sc-text);
@@ -899,13 +899,14 @@
 #schedule .sc-event.selected { outline:2px solid var(--sc-accent); outline-offset:1px; z-index:20; }
 #schedule .sc-ev-title { font-weight:600; }
 #schedule .sc-ev-time { font-size:9px; opacity:.7; margin-top:1px; }
+#schedule .sc-ev-notes { font-size:9px; opacity:.8; margin-top:2px; font-style:italic; white-space:pre-wrap; }
 #schedule .et-staff{background:var(--ev-staff);border-color:var(--ev-staff-b);color:var(--ev-staff-t);}
 #schedule .et-meal{background:var(--ev-meal);border-color:var(--ev-meal-b);color:var(--ev-meal-t);}
 #schedule .et-workshop{background:var(--ev-workshop);border-color:var(--ev-workshop-b);color:var(--ev-workshop-t);}
 #schedule .et-round{background:var(--ev-round);border-color:var(--ev-round-b);color:var(--ev-round-t);}
 #schedule .et-elective{background:var(--ev-elective);border-color:var(--ev-elective-b);color:var(--ev-elective-t);}
 #schedule .et-closing{background:var(--ev-closing);border-color:var(--ev-closing-b);color:var(--ev-closing-t);}
-#schedule .et-congress{background:var(--ev-congress);border-color:var(--ev-congress-b);color:var(--ev-congress-t);}
+#schedule .et-cabin_cup{background:var(--ev-cabin_cup);border-color:var(--ev-cabin_cup-b);color:var(--ev-cabin_cup-t);}
 #schedule .et-other{background:var(--ev-other);border-color:var(--ev-other-b);color:var(--ev-other-t);}
 #schedule .sc-dow-view { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
 #schedule .sc-dow-header { font-size:13px; font-weight:600; color:var(--sc-text); margin-bottom:8px; }
@@ -3907,10 +3908,10 @@ const ScheduleModule = (function () {
     if (c.includes('staff meeting') || c.includes('staff meet')) return 'staff';
     if (c.includes('lunch') || c.includes('breakfast') || c.includes('meal')) return 'meal';
     if (c.includes('dismissal') || c.includes('closing') || c.includes('icebreaker') || c.includes('opening')) return 'closing';
-    if (c.includes('congress') || c.includes('student council') || c.includes('election') || c.includes('discussion')) return 'congress';
-    if (c.includes('round') || c.includes('tournament') || c.includes('showcase') || c.includes('cabin cup') || c.includes('1v1') || c.includes('2v2')) return 'round';
+    if (c.includes('cabin cup')) return 'cabin_cup';
+    if (c.includes('round') || c.includes('tournament') || c.includes('showcase') || c.includes('1v1') || c.includes('2v2')) return 'round';
     if (c.includes('elective') || c.includes('park') || c.includes('breaks')) return 'elective';
-    if (c.includes('workshop') || c.includes('drills') || c.includes('preval') || c.includes('postval') || c.includes('ballot') || c.includes('reading') || c.includes('warmup') || c.includes('prep') || c.includes('model round') || c.includes('goal setting') || c.includes('impromptu')) return 'workshop';
+    if (c.includes('workshop') || c.includes('drills') || c.includes('preval') || c.includes('postval') || c.includes('ballot') || c.includes('reading') || c.includes('warmup') || c.includes('prep') || c.includes('model round') || c.includes('goal setting') || c.includes('impromptu') || c.includes('congress') || c.includes('student council') || c.includes('election') || c.includes('discussion')) return 'workshop';
     return 'other';
   }
   function getEvent(weekId, day, idx) {
@@ -3942,9 +3943,10 @@ const ScheduleModule = (function () {
         const sel = selectedEventKey === key ? 'selected' : '';
         return `<div class="sc-event et-${type} ${sel}" style="top:${top}px;height:${height}px;"
           data-week="${weekId}" data-day="${day}" data-idx="${idx}"
-          title="${escH(evData.content)} (${minsToStr(evData.time_start)}–${minsToStr(evData.time_end)})">
+          title="${escH(evData.content)}${evData.notes ? ' — ' + escH(evData.notes) : ''} (${minsToStr(evData.time_start)}–${minsToStr(evData.time_end)})">
           <div class="sc-ev-title">${escH(title)}</div>
           ${height > 26 ? `<div class="sc-ev-time">${minsToStr(evData.time_start)}${dur>30?'–'+minsToStr(evData.time_end):''}</div>` : ''}
+          ${evData.notes && height > 44 ? `<div class="sc-ev-notes">${escH(evData.notes)}</div>` : ''}
         </div>`;
       }).join('');
       const hlines = [];
@@ -3994,7 +3996,7 @@ const ScheduleModule = (function () {
           const key = `${wid}|${day}|${idx}`;
           return `<div class="sc-event et-${type} ${selectedEventKey===key?'selected':''}"
             style="top:${top}px;height:${height}px;font-size:9px;"
-            data-week="${wid}" data-day="${day}" data-idx="${idx}" title="${escH(evData.content)}">
+            data-week="${wid}" data-day="${day}" data-idx="${idx}" title="${escH(evData.content)}${evData.notes ? ' — ' + escH(evData.notes) : ''}">
             <div class="sc-ev-title" style="font-size:9px;">${escH(evData.content.split('\n')[0])}</div>
           </div>`;
         }).join('');
@@ -4049,9 +4051,9 @@ const ScheduleModule = (function () {
     renderBody();
   }
 
-  const typeLabels = {staff:'Staff meeting',meal:'Meal / Break',workshop:'Workshop',round:'Round / Competition',congress:'Congress',elective:'Electives',closing:'Closing / Dismissal',other:'Other'};
-  const typeColors = {staff:'var(--ev-staff-t)',meal:'var(--ev-meal-t)',workshop:'var(--ev-workshop-t)',round:'var(--ev-round-t)',congress:'var(--ev-congress-t)',elective:'var(--ev-elective-t)',closing:'var(--ev-closing-t)',other:'var(--ev-other-t)'};
-  const typeBgs = {staff:'var(--ev-staff)',meal:'var(--ev-meal)',workshop:'var(--ev-workshop)',round:'var(--ev-round)',congress:'var(--ev-congress)',elective:'var(--ev-elective)',closing:'var(--ev-closing)',other:'var(--ev-other)'};
+  const typeLabels = {staff:'Staff meeting',meal:'Meal / Break',workshop:'Lessons & Workshops',round:'Round / Competition',cabin_cup:'Cabin Cup',elective:'Electives',closing:'Closing / Dismissal',other:'Other'};
+  const typeColors = {staff:'var(--ev-staff-t)',meal:'var(--ev-meal-t)',workshop:'var(--ev-workshop-t)',round:'var(--ev-round-t)',cabin_cup:'var(--ev-cabin_cup-t)',elective:'var(--ev-elective-t)',closing:'var(--ev-closing-t)',other:'var(--ev-other-t)'};
+  const typeBgs = {staff:'var(--ev-staff)',meal:'var(--ev-meal)',workshop:'var(--ev-workshop)',round:'var(--ev-round)',cabin_cup:'var(--ev-cabin_cup)',elective:'var(--ev-elective)',closing:'var(--ev-closing)',other:'var(--ev-other)'};
 
   function selectEvent(weekId, day, idx) {
     selectedEventKey = `${weekId}|${day}|${idx}`;
@@ -4062,9 +4064,9 @@ const ScheduleModule = (function () {
     panel.querySelector('.sc-dp-title').textContent = evData.content.replace(/\n/g,' / ');
     panel.querySelector('.sc-dp-meta').textContent = `${SCHEDULE_DATA[weekId].meta.name} · ${day} · ${minsToStr(evData.time_start)} – ${minsToStr(evData.time_end)}`;
     panel.querySelector('.sc-dp-badge').style.cssText = `display:inline-block;font-size:10px;padding:2px 8px;border-radius:20px;font-weight:600;margin-top:6px;background:${typeBgs[type]};color:${typeColors[type]};border:1px solid ${typeColors[type]};`;
-    panel.querySelector('.sc-dp-badge').textContent = typeLabels[type];
+    panel.querySelector('.sc-dp-badge').textContent = typeLabels[type] || typeLabels.other;
     panel.querySelector('#sc-dp-title-view').textContent = evData.content.replace(/\n/g,' / ');
-    panel.querySelector('#sc-dp-type-view').textContent = typeLabels[type];
+    panel.querySelector('#sc-dp-type-view').textContent = typeLabels[type] || typeLabels.other;
     const notesView = panel.querySelector('#sc-dp-notes-view');
     notesView.textContent = evData.notes || 'No notes yet';
     notesView.style.color = evData.notes ? 'var(--sc-text)' : 'var(--sc-text-faint)';
@@ -4091,40 +4093,80 @@ const ScheduleModule = (function () {
     });
     document.getElementById('sc-btn-save').classList.toggle('sc-hidden', !editing);
     document.getElementById('sc-edit-toggle').textContent = editing ? '↩ Cancel edit' : '✏ Edit this event';
-    if (editing) document.getElementById('sc-dp-title-edit').focus();
+    document.getElementById('sc-dp-apply-field').classList.toggle('sc-hidden', !editing);
+    if (editing) {
+      populateApplyList();
+      document.getElementById('sc-dp-title-edit').focus();
+    }
+  }
+
+  // Populate the "apply to other days" checkboxes with every OTHER day in the same
+  // week that has an event whose start-time matches the current event.
+  function populateApplyList() {
+    const panel = document.getElementById('sc-detail');
+    const weekId = panel.dataset.week, day = panel.dataset.day, idx = parseInt(panel.dataset.idx);
+    const cur = getEvent(weekId, day, idx);
+    const list = document.getElementById('sc-dp-apply-list');
+    const otherDays = DAYS.filter(d => d !== day);
+    const items = otherDays.map(d => {
+      const events = SCHEDULE_DATA[weekId].days[d] || [];
+      const matchIdx = events.findIndex(ev => {
+        const evData = getEvent(weekId, d, events.indexOf(ev));
+        return evData.time_start === cur.time_start;
+      });
+      if (matchIdx < 0) {
+        return `<label style="display:flex; align-items:center; gap:4px; font-size:12px; color:var(--sc-text-faint); opacity:.5;">
+          <input type="checkbox" disabled> ${d.substring(0,3)}
+        </label>`;
+      }
+      return `<label style="display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer;">
+        <input type="checkbox" class="sc-apply-day" data-day="${d}" data-idx="${matchIdx}"> ${d.substring(0,3)}
+      </label>`;
+    }).join('');
+    list.innerHTML = items;
   }
   async function saveEdit() {
     const panel = document.getElementById('sc-detail');
     const weekId = panel.dataset.week, day = panel.dataset.day, idx = parseInt(panel.dataset.idx);
-    const key = `${weekId}|${day}|${idx}`;
     const newTitle = document.getElementById('sc-dp-title-edit').value.trim();
     const newType = document.getElementById('sc-dp-type-edit').value;
     const newNotes = document.getElementById('sc-dp-notes-edit').value.trim();
+
+    // Collect extra target (day, idx) pairs from the checkboxes
+    const applyTargets = [...document.querySelectorAll('.sc-apply-day:checked')]
+      .map(cb => ({ day: cb.dataset.day, idx: parseInt(cb.dataset.idx) }));
 
     const saveBtn = document.getElementById('sc-btn-save');
     saveBtn.disabled = true;
     const prevLabel = saveBtn.textContent;
     saveBtn.textContent = 'Saving…';
 
-    // Update local cache optimistically
-    if (!eventOverrides[key]) eventOverrides[key] = {};
-    eventOverrides[key].content = newTitle;
-    eventOverrides[key].type = newType;
-    eventOverrides[key].notes = newNotes;
+    // Build the target list: primary event + any extra days the user selected
+    const targets = [{ day, idx }, ...applyTargets];
 
-    // time_start/time_end are NOT NULL on schedule_events. This save flow doesn't let
-    // you edit the time, but the upsert still needs to supply the event's current
-    // (unchanged) start/end — otherwise the first edit to a slot (which INSERTs its
-    // first override row) tries to write NULL and the DB rejects it.
-    const currentEvent = getEvent(weekId, day, idx);
-
-    try {
-      const { error } = await sb.from('schedule_events').upsert({
-        week_id: weekId, day, event_index: idx,
+    // Update local cache optimistically and build the DB rows in one pass
+    const nowIso = new Date().toISOString();
+    const rows = targets.map(t => {
+      const key = `${weekId}|${t.day}|${t.idx}`;
+      const currentEvent = getEvent(weekId, t.day, t.idx);
+      if (!eventOverrides[key]) eventOverrides[key] = {};
+      eventOverrides[key].content = newTitle;
+      eventOverrides[key].type = newType;
+      eventOverrides[key].notes = newNotes;
+      // time_start/time_end are NOT NULL on schedule_events. The upsert always needs
+      // to supply the target slot's current (unchanged) start/end.
+      return {
+        week_id: weekId, day: t.day, event_index: t.idx,
         time_start: currentEvent.time_start, time_end: currentEvent.time_end,
         content: newTitle, type: newType, notes: newNotes || null,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'week_id,day,event_index' });
+        updated_at: nowIso,
+      };
+    });
+
+    try {
+      const { error } = await sb.from('schedule_events').upsert(rows, {
+        onConflict: 'week_id,day,event_index'
+      });
       if (error) throw error;
       setEditMode(false);
       selectEvent(weekId, day, idx);
@@ -4145,7 +4187,12 @@ const ScheduleModule = (function () {
       Object.keys(eventOverrides).forEach(k => delete eventOverrides[k]);
       (data || []).forEach(row => {
         const key = `${row.week_id}|${row.day}|${row.event_index}`;
-        eventOverrides[key] = { content: row.content, type: row.type, notes: row.notes };
+        // Backward-compat: the old "congress" type was removed in favor of "cabin_cup"
+        // for competition-day events, but generic congress content should show as a
+        // workshop/lesson instead of losing its color. Cabin Cup content classifies
+        // itself via classify() on next render, so unknown "congress" rows go to workshop.
+        const type = row.type === 'congress' ? 'workshop' : row.type;
+        eventOverrides[key] = { content: row.content, type, notes: row.notes };
       });
     } catch (err) {
       console.error('Could not load schedule edits:', err);
@@ -4157,8 +4204,8 @@ const ScheduleModule = (function () {
       `<button class="sc-week-btn ${i===0?'active':''}" id="sc-wbtn-${wid}" data-week="${wid}">${wdata.meta.name} · ${wdata.meta.date.split('–')[0].replace(/\u2013.*/,'').trim()}</button>`
     ).join('');
     const legend = [
-      ['staff','Staff'],['meal','Meal'],['workshop','Workshop'],['round','Round / Competition'],
-      ['congress','Congress'],['elective','Electives'],['closing','Closing / Misc']
+      ['staff','Staff'],['meal','Meal / Break'],['workshop','Lessons & Workshops'],['round','Round / Competition'],
+      ['cabin_cup','Cabin Cup'],['elective','Electives'],['closing','Closing / Misc']
     ].map(([t,l]) => `<div class="sc-legend-item"><div class="sc-legend-dot et-${t}"></div> ${l}</div>`).join('');
 
     document.getElementById('schedule-mount').innerHTML = `
@@ -4199,9 +4246,9 @@ const ScheduleModule = (function () {
             <select class="sc-hidden" id="sc-dp-type-edit">
               <option value="staff">Staff meeting</option>
               <option value="meal">Meal / Break</option>
-              <option value="workshop">Workshop</option>
+              <option value="workshop">Lessons & Workshops</option>
               <option value="round">Round / Competition</option>
-              <option value="congress">Congress</option>
+              <option value="cabin_cup">Cabin Cup</option>
               <option value="elective">Electives</option>
               <option value="closing">Closing / Dismissal</option>
               <option value="other">Other</option>
@@ -4215,6 +4262,13 @@ const ScheduleModule = (function () {
           <div class="sc-dp-field">
             <div class="sc-dp-label">Duration</div>
             <div class="sc-dp-value" id="sc-dp-duration"></div>
+          </div>
+          <div class="sc-dp-field sc-hidden" id="sc-dp-apply-field">
+            <div class="sc-dp-label">Apply changes to other days</div>
+            <div id="sc-dp-apply-list" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:4px;"></div>
+            <div style="font-size:11px; color:var(--sc-text-muted); margin-top:4px;">
+              Same time slot on each selected day gets the same title, type, and notes. Existing content on those days is overwritten.
+            </div>
           </div>
           <div style="margin-top:8px;"><span class="sc-edit-toggle" id="sc-edit-toggle">✏ Edit this event</span></div>
         </div>
