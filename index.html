@@ -3428,8 +3428,23 @@ const RESERVED_FIELDS = new Set([
   'name', 'current_grade', 'current_school', 'school_type', 'accommodations',
   'debate_experience', 'additional_comments', 'which_course', 'camp_class',
   'camp_cabin', 'signed_liability_form', 'dismissal_choice', 'has_laptop',
-  'food_allergies'
+  'food_allergies',
+  // Contact-detail columns — reserved so they can't be mistaken for roster names.
+  // Anything left over becomes a roster column.
+  'student_email', 'parent_email', 'student_phone', 'parent_phone',
+  'phone', 'email', 'notes',
 ]);
+
+// Which reserved fields should be copied verbatim from the CSV row onto a newly
+// created registration record. `name` is handled separately as student_name.
+const REGISTRATION_FIELDS = [
+  'current_grade', 'current_school', 'school_type', 'accommodations',
+  'debate_experience', 'additional_comments', 'which_course', 'camp_class',
+  'camp_cabin', 'signed_liability_form', 'dismissal_choice', 'has_laptop',
+  'food_allergies',
+  'student_email', 'parent_email', 'student_phone', 'parent_phone',
+  'phone', 'email', 'notes',
+];
 
 let batchImportData = null;
 
@@ -3450,7 +3465,7 @@ function openBatchImportModal() {
         <button class="secondary" id="batch-template-btn" style="padding: .4rem .8rem; font-size: .8rem;">Download CSV template</button>
       </div>
       <div class="field-hint" style="margin-top: .75rem;">
-        CSV with a <code>name</code> column matched against student names. Each other column becomes a roster; any non-empty cell = membership.
+        CSV with a <code>name</code> column. Names not already in registrations are created as new people (contact-detail columns like <code>student_email</code>, <code>parent_phone</code> are copied over). Any other column becomes a roster: put anything non-empty (<code>x</code>, <code>yes</code>) in the cell to add that person to that roster.
       </div>
     </div>
 
@@ -3459,7 +3474,7 @@ function openBatchImportModal() {
         <label>Paste CSV data</label>
         <textarea id="batch-paste-area" rows="8" placeholder="Paste CSV with a header row..."></textarea>
         <div class="field-hint">
-          Same format as upload. First column <code>name</code>, remaining columns = rosters.
+          Same format as upload. First column <code>name</code>, remaining columns become rosters (unless they match a known contact field like <code>student_email</code>).
         </div>
       </div>
       <button class="secondary" id="batch-parse-paste-btn" style="padding: .4rem .8rem; font-size: .85rem;">Preview</button>
@@ -3654,9 +3669,16 @@ function previewBatchCsv(text) {
     .map((h, i) => ({ name: h, idx: i }))
     .filter(x => x.name && !RESERVED_FIELDS.has(x.name.toLowerCase()));
 
+  // Map reserved-field name → csv column index, for pulling contact/detail values
+  // onto newly created registrations
+  const fieldColIdx = {};
+  REGISTRATION_FIELDS.forEach(f => {
+    const i = headers.findIndex(h => h.toLowerCase() === f);
+    if (i >= 0) fieldColIdx[f] = i;
+  });
+
   const existingByName = new Map(groups.map(g => [g.name.toLowerCase(), g]));
   const newGroups = groupCols.filter(gc => !existingByName.has(gc.name.toLowerCase()));
-  const existingGroups = groupCols.filter(gc => existingByName.has(gc.name.toLowerCase()));
 
   // Validate each row
   const regByName = new Map();
@@ -3665,21 +3687,21 @@ function previewBatchCsv(text) {
   });
 
   const issues = [];
+  let newPeopleCount = 0;
   const rowResults = rows.map((row, i) => {
     const rowNum = i + 2;
     const name = nameIdx >= 0 ? (row[nameIdx] || '').trim() : '';
     const memberships = groupCols.filter(gc => (row[gc.idx] || '').trim()).length;
     let status = 'ok', reason = '';
     if (!name) { status = 'err'; reason = 'Empty name'; }
-    else if (!regByName.has(name.toLowerCase())) { status = 'warn'; reason = 'Name not in registrations — will be skipped'; }
+    else if (!regByName.has(name.toLowerCase())) { status = 'new'; newPeopleCount++; }
     if (reason) issues.push(`Row ${rowNum}: ${reason} (${name || '<empty>'})`);
     return { rowNum, name, memberships, status };
   });
 
-  const validRows = rowResults.filter(r => r.status !== 'err' && r.status !== 'warn').length;
-  const skippedRows = rowResults.filter(r => r.status === 'warn' || r.status === 'err').length;
+  const validRows = rowResults.filter(r => r.status !== 'err').length;
 
-  batchImportData = { headers, rows, groupCols, nameIdx, existingByName, newGroups };
+  batchImportData = { headers, rows, groupCols, nameIdx, existingByName, newGroups, fieldColIdx };
 
   const wrap = document.getElementById('batch-preview-wrap');
   wrap.innerHTML = `
@@ -3687,14 +3709,14 @@ function previewBatchCsv(text) {
       <div class="preview-summary">
         <div class="preview-stat"><strong>${rows.length}</strong><span>Total rows</span></div>
         <div class="preview-stat"><strong>${validRows}</strong><span>Will be imported</span></div>
-        <div class="preview-stat"><strong>${groupCols.length}</strong><span>Group columns</span></div>
-        <div class="preview-stat"><strong>${newGroups.length}</strong><span>New groups</span></div>
+        <div class="preview-stat"><strong>${newPeopleCount}</strong><span>New people</span></div>
+        <div class="preview-stat"><strong>${newGroups.length}</strong><span>New rosters</span></div>
       </div>
 
       ${nameIdx === -1 ? '<div class="preview-issues" style="background:#fef2f2; border-color:#ef4444; color:#991b1b;">⚠ No "name" column found — cannot match members.</div>' : ''}
 
       <details style="font-size: .85rem; margin: .75rem 0;">
-        <summary style="cursor: pointer; color: var(--ink-soft);">Detected groups (${groupCols.length})</summary>
+        <summary style="cursor: pointer; color: var(--ink-soft);">Detected rosters (${groupCols.length})</summary>
         <div style="margin-top: .5rem; padding: .5rem; background: var(--paper-light); border-radius: 4px; display: flex; flex-wrap: wrap; gap: .3rem;">
           ${groupCols.map(gc => {
             const isNew = !existingByName.has(gc.name.toLowerCase());
@@ -3710,11 +3732,11 @@ function previewBatchCsv(text) {
           </thead>
           <tbody>
             ${rowResults.slice(0, 200).map(r => `
-              <tr class="${r.status === 'err' ? 'preview-row-err' : (r.status === 'warn' ? 'preview-row-warn' : '')}">
+              <tr class="${r.status === 'err' ? 'preview-row-err' : (r.status === 'new' ? 'preview-row-warn' : '')}">
                 <td>${r.rowNum}</td>
                 <td>${esc(r.name) || '<em style="color:var(--ink-mute)">empty</em>'}</td>
                 <td>${r.memberships}</td>
-                <td>${r.status === 'ok' ? '✓ ready' : (r.status === 'warn' ? '⚠ unmatched' : '✗ error')}</td>
+                <td>${r.status === 'ok' ? '✓ matched' : (r.status === 'new' ? '+ new person' : '✗ error')}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -3723,6 +3745,10 @@ function previewBatchCsv(text) {
       ${rowResults.length > 200 ? `<div class="field-hint">Showing first 200 of ${rowResults.length} rows.</div>` : ''}
 
       ${issues.length > 0 ? `<div class="preview-issues">${issues.slice(0, 30).map(i => `<div>${esc(i)}</div>`).join('')}${issues.length > 30 ? `<div>... and ${issues.length - 30} more</div>` : ''}</div>` : ''}
+
+      ${newPeopleCount > 0 ? `<div class="field-hint" style="margin-top:.5rem;">
+        ${newPeopleCount} new ${newPeopleCount === 1 ? 'person' : 'people'} will be added to the registrations table. Contact-detail columns in the CSV (student_email, parent_email, student_phone, parent_phone, etc.) are copied over automatically; you can fill in or edit any details later from the Add Person popup.
+      </div>` : ''}
     </div>
   `;
 
@@ -3732,13 +3758,13 @@ function previewBatchCsv(text) {
   confirmBtn.textContent = `Import ${validRows} row${validRows === 1 ? '' : 's'}`;
 }
 
-async function runBatchImport({ headers, rows, groupCols, nameIdx, existingByName, newGroups }) {
+async function runBatchImport({ headers, rows, groupCols, nameIdx, existingByName, newGroups, fieldColIdx }) {
   const btn = document.getElementById('batch-confirm-btn');
   btn.disabled = true;
   btn.textContent = 'Importing...';
 
   try {
-    // 1) Create new groups
+    // 1) Create new rosters
     if (newGroups.length > 0) {
       const toCreate = newGroups.map(gc => ({
         name: gc.name, description: '', group_type: 'class', is_editable: true
@@ -3751,22 +3777,55 @@ async function runBatchImport({ headers, rows, groupCols, nameIdx, existingByNam
       });
     }
 
-    // 2) Match rows to registrations
+    // 2) Identify unmatched people and prepare their new registration rows
     const regByName = new Map();
     registrations.forEach(r => {
       if (r.student_name) regByName.set(r.student_name.toLowerCase().trim(), r);
     });
 
-    // 3) Build new memberships (skip existing)
+    const newRegistrationRows = [];
+    const seenNewNames = new Set();
+    for (const row of rows) {
+      const name = (row[nameIdx] || '').trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (regByName.has(key) || seenNewNames.has(key)) continue;
+      seenNewNames.add(key);
+
+      const rec = { student_name: name };
+      // Copy any CSV-provided contact/detail fields onto the new record
+      Object.entries(fieldColIdx || {}).forEach(([field, colIdx]) => {
+        const val = (row[colIdx] || '').trim();
+        if (val) rec[field] = val;
+      });
+      newRegistrationRows.push(rec);
+    }
+
+    // 3) Create new registrations (batched); update local cache with returned rows
+    let peopleCreated = 0;
+    if (newRegistrationRows.length > 0) {
+      for (let i = 0; i < newRegistrationRows.length; i += 100) {
+        const batch = newRegistrationRows.slice(i, i + 100);
+        const { data, error } = await sb.from('registrations').insert(batch).select();
+        if (error) throw error;
+        (data || []).forEach(r => {
+          registrations.push(r);
+          if (r.student_name) regByName.set(r.student_name.toLowerCase().trim(), r);
+        });
+        peopleCreated += (data || []).length;
+      }
+    }
+
+    // 4) Build new memberships (skip existing)
     const existingSet = new Set(groupMembers.map(gm => `${gm.group_id}|${gm.registration_id}`));
     const newMemberships = [];
-    let matched = 0, unmatched = 0;
+    let matched = 0;
 
     for (const row of rows) {
       const name = (row[nameIdx] || '').trim();
       if (!name) continue;
       const reg = regByName.get(name.toLowerCase());
-      if (!reg) { unmatched++; continue; }
+      if (!reg) continue; // shouldn't happen after step 3, but stay defensive
       matched++;
       for (const gc of groupCols) {
         const cellVal = (row[gc.idx] || '').trim();
@@ -3780,8 +3839,9 @@ async function runBatchImport({ headers, rows, groupCols, nameIdx, existingByNam
       }
     }
 
-    // 4) Insert in batches — best-effort: the groups from step 1 are already saved,
-    // so a hiccup here shouldn't leave the modal stuck open.
+    // 5) Insert memberships in batches — best-effort: the people from step 3 and the
+    // rosters from step 1 are already saved, so a hiccup here shouldn't leave the
+    // modal stuck open.
     let membershipError = '';
     try {
       for (let i = 0; i < newMemberships.length; i += 100) {
@@ -3795,18 +3855,21 @@ async function runBatchImport({ headers, rows, groupCols, nameIdx, existingByNam
     }
 
     renderGroups();
+    renderDashboard();
     closeModal();
 
     if (membershipError) {
       showGroupsBanner(
-        `${newGroups.length} new groups created, but memberships failed to save: ${membershipError}`,
+        `${newGroups.length} rosters, ${peopleCreated} new people created, but memberships failed to save: ${membershipError}`,
         'err'
       );
     } else {
-      showGroupsBanner(
-        `✓ ${newGroups.length} new groups, ${matched} people matched, ${newMemberships.length} memberships added${unmatched > 0 ? `, ${unmatched} unmatched` : ''}`,
-        'ok'
-      );
+      const parts = [];
+      if (newGroups.length) parts.push(`${newGroups.length} new roster${newGroups.length === 1 ? '' : 's'}`);
+      if (peopleCreated) parts.push(`${peopleCreated} new ${peopleCreated === 1 ? 'person' : 'people'}`);
+      parts.push(`${matched} row${matched === 1 ? '' : 's'} processed`);
+      parts.push(`${newMemberships.length} membership${newMemberships.length === 1 ? '' : 's'} added`);
+      showGroupsBanner('✓ ' + parts.join(', '), 'ok');
     }
   } catch (err) {
     btn.disabled = false;
@@ -3816,10 +3879,20 @@ async function runBatchImport({ headers, rows, groupCols, nameIdx, existingByNam
 }
 
 function downloadTemplate() {
-  // Provide a template using the user's actual reserved-field headers + a few example group columns
+  // Full-featured template covering the typical person-detail fields plus a few
+  // example roster columns. Any header not in RESERVED_FIELDS is treated as a
+  // roster name; any non-empty cell means "add this person to that roster".
   const groupExamples = ['Web programming', 'Econ 101', 'Politics & Elections', 'Mock trial'];
-  const headers = ['name', 'current_grade', 'current_school', 'food_allergies', ...groupExamples];
-  const example = ['Jane Doe', '10', 'Brooklyn Prep', 'peanuts', 'x', '', 'x', ''];
+  const headers = [
+    'name', 'student_email', 'parent_email', 'student_phone', 'parent_phone',
+    'current_grade', 'current_school', 'food_allergies', 'accommodations',
+    ...groupExamples,
+  ];
+  const example = [
+    'Jane Doe', 'jane@example.com', 'parent@example.com', '555-0100', '555-0101',
+    '10', 'Brooklyn Prep', 'peanuts', '',
+    'x', '', 'x', '',
+  ];
   const csv = [
     headers.map(h => `"${h}"`).join(','),
     example.map(v => `"${v}"`).join(',')
