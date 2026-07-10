@@ -3962,6 +3962,56 @@ const ScheduleModule = (function () {
   // Edit overrides, loaded from Supabase (public.schedule_events). Keyed by "week|day|idx".
   const eventOverrides = {};
 
+  // Assign a horizontal "column" and a total column count to each event so that
+  // overlapping events sit side-by-side within the day column.
+  //
+  // Greedy interval-graph coloring: sort by start time, then by end time. For each
+  // event, put it in the first column whose last event has already ended. Events
+  // that overlap in time get different columns.
+  //
+  // Returns an array parallel to `events` of {col, colCount} — colCount is the peak
+  // simultaneous overlap of any event in the cluster this event belongs to (so
+  // widths line up within an overlap cluster even if columns are recycled later).
+  function computeLayout(events) {
+    const n = events.length;
+    if (!n) return [];
+    const order = events.map((ev, i) => i).sort((a, b) => {
+      const A = events[a], B = events[b];
+      return (A.time_start - B.time_start) || (A.time_end - B.time_end);
+    });
+    const layout = new Array(n);
+    // Each entry in `cols` is the end-time currently occupying that column, or -Infinity if free.
+    const cols = [];
+    // Track clusters: contiguous groups of events that overlap transitively.
+    let clusterStart = 0; // index in `order` where the current cluster began
+    let clusterMaxEnd = -Infinity;
+    let clusterMembers = [];
+    const clusters = []; // {members: [origIdx...], colCount}
+
+    for (let i = 0; i < order.length; i++) {
+      const idx = order[i];
+      const ev = events[idx];
+      // If this event starts at or after every open column's end, the previous cluster is finished.
+      if (ev.time_start >= clusterMaxEnd && clusterMembers.length > 0) {
+        clusters.push({ members: clusterMembers, colCount: cols.length });
+        cols.length = 0;
+        clusterMembers = [];
+        clusterMaxEnd = -Infinity;
+      }
+      // Find the first free column
+      let colIdx = cols.findIndex(end => end <= ev.time_start);
+      if (colIdx === -1) { cols.push(ev.time_end); colIdx = cols.length - 1; }
+      else cols[colIdx] = ev.time_end;
+      layout[idx] = { col: colIdx };
+      clusterMembers.push(idx);
+      if (ev.time_end > clusterMaxEnd) clusterMaxEnd = ev.time_end;
+    }
+    if (clusterMembers.length > 0) clusters.push({ members: clusterMembers, colCount: cols.length });
+    // Attach colCount from cluster to each event
+    clusters.forEach(c => c.members.forEach(idx => { layout[idx].colCount = c.colCount; }));
+    return layout;
+  }
+
   function minsToStr(m) {
     const h = Math.floor(m/60), mi = m%60;
     const suffix = h < 12 ? 'AM' : 'PM';
@@ -4005,8 +4055,11 @@ const ScheduleModule = (function () {
     }
     const cols = DAYS.map(day => {
       const events = wdata.days[day] || [];
+      // Get effective (overridden) times for layout — an override could change duration
+      const effEvents = events.map((ev, idx) => getEvent(weekId, day, idx));
+      const layout = computeLayout(effEvents);
       const evBlocks = events.map((ev, idx) => {
-        const evData = getEvent(weekId, day, idx);
+        const evData = effEvents[idx];
         const type = evData.type || classify(evData.content);
         const top = (evData.time_start-DAY_START)*PX_PER_MIN;
         const height = Math.max((evData.time_end-evData.time_start)*PX_PER_MIN-2, 16);
@@ -4014,7 +4067,12 @@ const ScheduleModule = (function () {
         const dur = evData.time_end-evData.time_start;
         const title = evData.content.replace(/\n/g,' / ');
         const sel = selectedEventKey === key ? 'selected' : '';
-        return `<div class="sc-event et-${type} ${sel}" style="top:${top}px;height:${height}px;"
+        // Side-by-side positioning: split the day column into `colCount` sub-columns
+        // for the duration of this overlap cluster. Percentages so it stays responsive.
+        const { col, colCount } = layout[idx];
+        const widthPct = 100 / colCount;
+        const leftPct = col * widthPct;
+        return `<div class="sc-event et-${type} ${sel}" style="top:${top}px;height:${height}px;left:calc(${leftPct}% + 2px);width:calc(${widthPct}% - 4px);right:auto;"
           data-week="${weekId}" data-day="${day}" data-idx="${idx}"
           title="${escH(evData.content)}${evData.notes ? ' — ' + escH(evData.notes) : ''} (${minsToStr(evData.time_start)}–${minsToStr(evData.time_end)})">
           <div class="sc-ev-title">${escH(title)}</div>
@@ -4061,14 +4119,19 @@ const ScheduleModule = (function () {
     const weekCols = Object.entries(SCHEDULE_DATA).map(([wid, wdata]) => {
       const dayCols = DAYS.map(day => {
         const events = wdata.days[day] || [];
+        const effEvents = events.map((ev, idx) => getEvent(wid, day, idx));
+        const layout = computeLayout(effEvents);
         const evBlocks = events.map((ev, idx) => {
-          const evData = getEvent(wid, day, idx);
+          const evData = effEvents[idx];
           const type = evData.type || classify(evData.content);
           const top = (evData.time_start-DAY_START)*PX_PER_MIN;
           const height = Math.max((evData.time_end-evData.time_start)*PX_PER_MIN-2, 14);
           const key = `${wid}|${day}|${idx}`;
+          const { col, colCount } = layout[idx];
+          const widthPct = 100 / colCount;
+          const leftPct = col * widthPct;
           return `<div class="sc-event et-${type} ${selectedEventKey===key?'selected':''}"
-            style="top:${top}px;height:${height}px;font-size:9px;"
+            style="top:${top}px;height:${height}px;font-size:9px;left:calc(${leftPct}% + 1px);width:calc(${widthPct}% - 2px);right:auto;"
             data-week="${wid}" data-day="${day}" data-idx="${idx}" title="${escH(evData.content)}${evData.notes ? ' — ' + escH(evData.notes) : ''}">
             <div class="sc-ev-title" style="font-size:9px;">${escH(evData.content.split('\n')[0])}</div>
           </div>`;
@@ -4252,6 +4315,123 @@ const ScheduleModule = (function () {
     }
   }
 
+  function openAddEventDialog() {
+    const weekName = SCHEDULE_DATA[currentWeek].meta.name;
+    // Default day to the selected event's day if one is selected
+    let defaultDay = 'Monday';
+    if (selectedEventKey) {
+      const parts = selectedEventKey.split('|');
+      if (parts[0] === currentWeek && DAYS.includes(parts[1])) defaultDay = parts[1];
+    }
+    const dayOpts = DAYS.map(d => `<option value="${d}"${d === defaultDay ? ' selected' : ''}>${d}</option>`).join('');
+    const typeOpts = [
+      ['staff','Staff meeting'],['meal','Meal / Break'],['workshop','Lessons & Workshops'],
+      ['round','Round / Competition'],['cabin_cup','Cabin Cup'],['elective','Electives'],
+      ['closing','Closing / Dismissal'],['other','Other'],
+    ].map(([v,l]) => `<option value="${v}">${l}</option>`).join('');
+    // Default start/end time to the selected event's window if applicable
+    let defaultStart = '10:00', defaultEnd = '11:00';
+    if (selectedEventKey) {
+      const [wid, day, idxStr] = selectedEventKey.split('|');
+      if (wid === currentWeek) {
+        const ev = getEvent(wid, day, parseInt(idxStr));
+        if (ev) {
+          const toHm = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+          defaultStart = toHm(ev.time_start);
+          defaultEnd = toHm(ev.time_end);
+        }
+      }
+    }
+    const body = `
+      <div class="field-hint" style="margin-bottom:.75rem;">
+        Adding to <strong>${weekName}</strong>. This creates an event alongside anything already scheduled — overlapping events display side-by-side.
+      </div>
+      <div class="field">
+        <label>Day</label>
+        <select id="sc-add-day" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:6px;font-family:var(--body);">${dayOpts}</select>
+      </div>
+      <div style="display:flex;gap:.5rem;">
+        <div class="field" style="flex:1;">
+          <label>Start</label>
+          <input type="time" id="sc-add-start" value="${defaultStart}" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:6px;font-family:var(--body);">
+        </div>
+        <div class="field" style="flex:1;">
+          <label>End</label>
+          <input type="time" id="sc-add-end" value="${defaultEnd}" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:6px;font-family:var(--body);">
+        </div>
+      </div>
+      <div class="field">
+        <label>Title</label>
+        <input type="text" id="sc-add-title" placeholder="e.g. Coaches meeting" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:6px;font-family:var(--body);">
+      </div>
+      <div class="field">
+        <label>Type</label>
+        <select id="sc-add-type" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:6px;font-family:var(--body);">${typeOpts}</select>
+      </div>
+      <div class="field">
+        <label>Notes (optional)</label>
+        <textarea id="sc-add-notes" rows="2" placeholder="Rooms, staff, details…" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:6px;font-family:var(--body);"></textarea>
+      </div>
+    `;
+    const footer = `
+      <button class="secondary" type="button" data-modal-close>Cancel</button>
+      <button class="primary" type="button" id="sc-add-save-btn">Add event</button>
+    `;
+    openModal(`Add event to ${weekName}`, body, footer, { size: 'sm' });
+
+    // Parse "HH:MM" time input to minutes-since-midnight
+    function timeToMins(hhmm) {
+      const [h, m] = hhmm.split(':').map(Number);
+      return h * 60 + m;
+    }
+
+    document.getElementById('sc-add-save-btn').addEventListener('click', async () => {
+      const day = document.getElementById('sc-add-day').value;
+      const startStr = document.getElementById('sc-add-start').value;
+      const endStr = document.getElementById('sc-add-end').value;
+      const title = document.getElementById('sc-add-title').value.trim();
+      const type = document.getElementById('sc-add-type').value;
+      const notes = document.getElementById('sc-add-notes').value.trim();
+
+      if (!startStr || !endStr) return alert('Please pick a start and end time.');
+      const time_start = timeToMins(startStr);
+      const time_end = timeToMins(endStr);
+      if (time_end <= time_start) return alert('End time must be after start time.');
+      if (!title) return alert('Please enter a title.');
+
+      const saveBtn = document.getElementById('sc-add-save-btn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+
+      // Append (do NOT insert-and-reorder — event_index is stable, sorting is done
+      // at render time by computeLayout, so appending is safe for existing overrides).
+      const events = SCHEDULE_DATA[currentWeek].days[day];
+      const newIdx = events.length;
+      const newRow = { time_start, time_end, content: title };
+      events.push(newRow);
+      const key = `${currentWeek}|${day}|${newIdx}`;
+      eventOverrides[key] = { content: title, type, notes };
+
+      try {
+        const { error } = await sb.from('schedule_events').upsert([{
+          week_id: currentWeek, day, event_index: newIdx,
+          time_start, time_end, content: title, type, notes: notes || null,
+          updated_at: new Date().toISOString(),
+        }], { onConflict: 'week_id,day,event_index' });
+        if (error) throw error;
+        closeModal();
+        renderBody();
+      } catch (err) {
+        // Roll back local state if the save failed
+        events.pop();
+        delete eventOverrides[key];
+        alert('Save failed: ' + err.message);
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Add event';
+      }
+    });
+  }
+
   async function loadOverrides() {
     try {
       const { data, error } = await sb.from('schedule_events').select('*');
@@ -4266,6 +4446,16 @@ const ScheduleModule = (function () {
         // itself via classify() on next render, so unknown "congress" rows go to workshop.
         const type = row.type === 'congress' ? 'workshop' : row.type;
         eventOverrides[key] = { content: row.content, type, notes: row.notes };
+
+        // If this override refers to an event_index beyond the built-in schedule,
+        // it's a user-added event — materialize a slot for it so getEvent() finds
+        // the base row and the layout algorithm sees the correct time range.
+        const arr = SCHEDULE_DATA[row.week_id] && SCHEDULE_DATA[row.week_id].days[row.day];
+        if (arr) {
+          while (arr.length <= row.event_index) {
+            arr.push({ time_start: row.time_start, time_end: row.time_end, content: row.content });
+          }
+        }
       });
     } catch (err) {
       console.error('Could not load schedule edits:', err);
@@ -4289,7 +4479,8 @@ const ScheduleModule = (function () {
           <button class="sc-tab-btn" id="sc-tab-dow" data-view="dow">Day of week</button>
           <button class="sc-tab-btn" id="sc-tab-all" data-view="all">All weeks</button>
         </div>
-        <button class="sc-week-btn" id="sc-refresh-btn" style="margin-left:auto;" title="Pull the latest edits from others">↻ Refresh</button>
+        <button class="sc-week-btn" id="sc-add-event-btn" style="margin-left:auto;">+ Add event</button>
+        <button class="sc-week-btn" id="sc-refresh-btn" title="Pull the latest edits from others">↻ Refresh</button>
       </div>
       <div class="sc-week-nav" id="sc-week-nav">
         ${weekBtns}
@@ -4371,6 +4562,7 @@ const ScheduleModule = (function () {
       btn.disabled = false;
       btn.textContent = prev;
     });
+    document.getElementById('sc-add-event-btn').addEventListener('click', openAddEventDialog);
   }
 
   async function init() {
