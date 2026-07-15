@@ -421,26 +421,38 @@
       border-radius: 10px;
       overflow: hidden;
       box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      font-size: 0.82rem;
     }
     
     .roster-table thead th {
       background: var(--paper-light);
-      padding: 0.75rem;
+      padding: 0.5rem 0.35rem;
       text-align: left;
       font-weight: 600;
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       color: var(--ink-soft);
       border-bottom: 1px solid var(--border);
     }
     
     .roster-table tbody td {
-      padding: 0.75rem;
+      padding: 0.4rem 0.35rem;
       border-bottom: 1px solid var(--border-soft);
+      vertical-align: middle;
     }
     
     .roster-table tbody tr:hover {
       background: var(--paper-light);
     }
+
+    /* Contact + roster cells: small, tight, wrap gracefully */
+    .att-contact { font-size: 0.72rem; color: var(--ink-soft); line-height: 1.35; }
+    .att-contact a { color: var(--ink-soft); text-decoration: none; }
+    .att-contact a:hover { color: var(--orange); }
+    .att-rosters { font-size: 0.72rem; color: var(--ink-soft); line-height: 1.35; }
+    .att-rosters .roster-pill { display: inline-block; padding: 1px 5px; margin: 1px 2px 1px 0; background: var(--paper-light); border-radius: 3px; white-space: nowrap; }
+
+    /* Slim spectrum + checkbox cells further */
+    #roster-body .spectrum button { padding: 2px 5px; font-size: 0.7rem; }
     
     .hidden { display: none !important; }
     
@@ -1082,16 +1094,18 @@
         <table class="roster-table" id="roster-table">
           <thead>
             <tr>
-              <th style="width: 36px;"><input type="checkbox" id="att-select-all" title="Select all"></th>
+              <th style="width: 28px;"><input type="checkbox" id="att-select-all" title="Select all"></th>
               <th>Name</th>
-              <th>Grade</th>
-              <th style="width: 90px; text-align:center;">Showed Up</th>
-              <th style="width: 90px; text-align:center;">Dismissed</th>
+              <th style="width: 46px;">Grade</th>
+              <th style="min-width: 130px;">Contact</th>
+              <th style="min-width: 130px;">Academic rosters</th>
+              <th style="width: 60px; text-align:center;">Here</th>
+              <th style="width: 60px; text-align:center;">Out</th>
               <th>Status</th>
-              <th style="width: 80px;">Excused</th>
-              <th style="width: 100px;">Reached out</th>
-              <th style="min-width: 180px;">Notes</th>
-              <th>Marked At</th>
+              <th style="width: 54px;">Exc.</th>
+              <th style="width: 60px;">Reached</th>
+              <th style="min-width: 140px;">Notes</th>
+              <th style="width: 100px;">Marked At</th>
             </tr>
           </thead>
           <tbody id="roster-body">
@@ -1719,7 +1733,7 @@ async function loadRoster() {
   tbody.innerHTML = '';
 
   if (members.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:var(--ink-mute); padding:2rem;">This roster has no members yet. Add some in the Rosters tab.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="12" style="text-align:center; color:var(--ink-mute); padding:2rem;">This roster has no members yet. Add some in the Rosters tab.</td></tr>';
     return;
   }
 
@@ -1738,26 +1752,53 @@ function buildAttendanceRow(reg, groupId, date) {
   const dismissed = !!att?.dismissed;
   const notes = att?.notes || '';
 
+  // Contact info — parent contact preferred, falls back to student. Concatenated in one cell.
+  const contactParts = [];
+  const parentEmail = reg.parent_email || '';
+  const parentPhone = reg.parent_phone || '';
+  const studentEmail = reg.student_email || '';
+  const studentPhone = reg.student_phone || reg.phone || '';
+  if (parentEmail) contactParts.push(`<a href="mailto:${esc(parentEmail)}" title="Parent email">${esc(parentEmail)}</a>`);
+  if (parentPhone) contactParts.push(`<a href="tel:${esc(parentPhone)}" title="Parent phone">${esc(parentPhone)}</a>`);
+  if (!parentEmail && studentEmail) contactParts.push(`<a href="mailto:${esc(studentEmail)}" title="Student email">${esc(studentEmail)}</a>`);
+  if (!parentPhone && studentPhone) contactParts.push(`<a href="tel:${esc(studentPhone)}" title="Student phone">${esc(studentPhone)}</a>`);
+  const contactHtml = contactParts.length ? contactParts.join('<br>') : '<span style="color:var(--ink-mute);">—</span>';
+
+  // Academic rosters — Academic Groups + Workshops & Electives that this student belongs to.
+  // "Day" rosters are excluded since they're already implied by the date being selected.
+  const academicTypes = new Set(['grade', 'class', 'middle_schoolers', 'high_schoolers']);
+  const memberRosterIds = groupMembers
+    .filter(gm => gm.registration_id === regId)
+    .map(gm => gm.group_id);
+  const rosterPills = groups
+    .filter(g => memberRosterIds.includes(g.id) && academicTypes.has(g.group_type))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(g => `<span class="roster-pill" title="${esc(rosterTypeLabel(g.group_type))}">${esc(g.name)}</span>`)
+    .join('');
+  const rostersHtml = rosterPills || '<span style="color:var(--ink-mute);">—</span>';
+
   const row = document.createElement('tr');
   row.dataset.regId = regId;
   row.innerHTML = `
     <td><input type="checkbox" class="row-select" data-reg-id="${regId}" ${attSelected.has(regId) ? 'checked' : ''}></td>
     <td>${esc(reg.student_name)}</td>
     <td>${reg.current_grade ? esc(reg.current_grade) : '—'}</td>
+    <td class="att-contact">${contactHtml}</td>
+    <td class="att-rosters">${rostersHtml}</td>
     <td style="text-align:center;"><label class="att-check" style="justify-content:center;"><input type="checkbox" class="present-check" data-reg-id="${regId}" ${present?'checked':''}></label></td>
     <td style="text-align:center;"><label class="att-check" style="justify-content:center;"><input type="checkbox" class="dismissed-check" data-reg-id="${regId}" ${dismissed?'checked':''}></label></td>
     <td>
       <div class="spectrum att-spectrum" data-reg-id="${regId}">
-        <button type="button" data-level="absent" class="${level==='absent'?'on':''}">Absent</button>
+        <button type="button" data-level="absent" class="${level==='absent'?'on':''}">Abs</button>
         <button type="button" data-level="attended_barely" class="${level==='attended_barely'?'on':''}">0–50%</button>
         <button type="button" data-level="attended_partially" class="${level==='attended_partially'?'on':''}">50–90%</button>
         <button type="button" data-level="attended_fully" class="${level==='attended_fully'?'on':''}">90%+</button>
       </div>
     </td>
-    <td><label class="att-check"><input type="checkbox" class="excused-check" data-reg-id="${regId}" ${excused?'checked':''}></label></td>
-    <td><label class="att-check"><input type="checkbox" class="reached-check" data-reg-id="${regId}" ${reached?'checked':''}></label></td>
-    <td><input type="text" class="notes-input" data-reg-id="${regId}" value="${esc(notes)}" placeholder="e.g. left early with nosebleed" style="width:100%; min-width:160px; padding:.35rem .5rem; border:1px solid var(--border); border-radius:5px; font-family:var(--body); font-size:.82rem;"></td>
-    <td class="marked-at">${att?.last_marked_at ? new Date(att.last_marked_at).toLocaleString() : '—'}</td>
+    <td style="text-align:center;"><label class="att-check" style="justify-content:center;"><input type="checkbox" class="excused-check" data-reg-id="${regId}" ${excused?'checked':''}></label></td>
+    <td style="text-align:center;"><label class="att-check" style="justify-content:center;"><input type="checkbox" class="reached-check" data-reg-id="${regId}" ${reached?'checked':''}></label></td>
+    <td><input type="text" class="notes-input" data-reg-id="${regId}" value="${esc(notes)}" placeholder="e.g. left early" style="width:100%; min-width:120px; padding:.25rem .35rem; border:1px solid var(--border); border-radius:4px; font-family:var(--body); font-size:.75rem;"></td>
+    <td class="marked-at" style="font-size:0.72rem; color:var(--ink-soft); white-space:nowrap;">${att?.last_marked_at ? new Date(att.last_marked_at).toLocaleString([], {month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'}) : '—'}</td>
   `;
 
   // Row select checkbox
@@ -1985,15 +2026,26 @@ function exportRosterCSV() {
   const rosterName = groupSel.options[groupSel.selectedIndex]?.text || 'roster';
   const date = document.getElementById('attendance-date').value;
 
-  const rows = [['Name', 'Grade', 'Showed Up', 'Dismissed', 'Status', 'Excused', 'Reached Out', 'Notes', 'Marked At']];
+  const rows = [['Name', 'Grade', 'Parent Email', 'Parent Phone', 'Student Email', 'Student Phone', 'Academic Rosters', 'Showed Up', 'Dismissed', 'Status', 'Excused', 'Reached Out', 'Notes', 'Marked At']];
+  const academicTypes = new Set(['grade', 'class', 'middle_schoolers', 'high_schoolers']);
 
   tbody.querySelectorAll('tr[data-reg-id]').forEach(tr => {
     const regId = tr.dataset.regId;
     const reg = registrations.find(r => r.id === regId);
     const att = attendanceMap[regId];
+    const memberIds = groupMembers.filter(gm => gm.registration_id === regId).map(gm => gm.group_id);
+    const rosterNames = groups
+      .filter(g => memberIds.includes(g.id) && academicTypes.has(g.group_type))
+      .map(g => g.name)
+      .join('; ');
     rows.push([
       reg?.student_name || '',
       reg?.current_grade || '',
+      reg?.parent_email || '',
+      reg?.parent_phone || '',
+      reg?.student_email || '',
+      reg?.student_phone || reg?.phone || '',
+      rosterNames,
       att?.present ? 'Yes' : '',
       att?.dismissed ? 'Yes' : '',
       att?.status ? (STATUS_EXPORT_LABELS[att.status] || att.status) : '',
@@ -4289,15 +4341,33 @@ const ScheduleModule = (function () {
       eventOverrides[key].content = newTitle;
       eventOverrides[key].type = newType;
       eventOverrides[key].notes = newNotes;
-      // time_start/time_end are NOT NULL on schedule_events. The upsert always needs
-      // to supply the target slot's current (unchanged) start/end.
+      // time_start/time_end are NOT NULL on schedule_events. If the base event data
+      // hasn't been materialized locally (edge case: a collaborator added this event
+      // via a different session and we haven't refreshed), fall back to whatever we
+      // have on the override itself before failing.
+      const ts = currentEvent && currentEvent.time_start != null
+        ? currentEvent.time_start
+        : (eventOverrides[key].time_start != null ? eventOverrides[key].time_start : null);
+      const te = currentEvent && currentEvent.time_end != null
+        ? currentEvent.time_end
+        : (eventOverrides[key].time_end != null ? eventOverrides[key].time_end : null);
       return {
         week_id: weekId, day: t.day, event_index: t.idx,
-        time_start: currentEvent.time_start, time_end: currentEvent.time_end,
+        time_start: ts, time_end: te,
         content: newTitle, type: newType, notes: newNotes || null,
         updated_at: nowIso,
       };
     });
+
+    // Bail with a clear message if any target ended up without a time.
+    const missing = rows.find(r => r.time_start == null || r.time_end == null);
+    if (missing) {
+      alert(`Can't save: missing start/end time for ${missing.day} #${missing.event_index}. ` +
+            `Try clicking Refresh at the top of the schedule and then editing again.`);
+      saveBtn.disabled = false;
+      saveBtn.textContent = prevLabel;
+      return;
+    }
 
     try {
       const { error } = await sb.from('schedule_events').upsert(rows, {
@@ -4410,7 +4480,7 @@ const ScheduleModule = (function () {
       const newRow = { time_start, time_end, content: title };
       events.push(newRow);
       const key = `${currentWeek}|${day}|${newIdx}`;
-      eventOverrides[key] = { content: title, type, notes };
+      eventOverrides[key] = { content: title, type, notes, time_start, time_end };
 
       try {
         const { error } = await sb.from('schedule_events').upsert([{
@@ -4445,7 +4515,10 @@ const ScheduleModule = (function () {
         // workshop/lesson instead of losing its color. Cabin Cup content classifies
         // itself via classify() on next render, so unknown "congress" rows go to workshop.
         const type = row.type === 'congress' ? 'workshop' : row.type;
-        eventOverrides[key] = { content: row.content, type, notes: row.notes };
+        eventOverrides[key] = {
+          content: row.content, type, notes: row.notes,
+          time_start: row.time_start, time_end: row.time_end,
+        };
 
         // If this override refers to an event_index beyond the built-in schedule,
         // it's a user-added event — materialize a slot for it so getEvent() finds
